@@ -1,0 +1,110 @@
+@page "/User"
+@using Microsoft.AspNetCore.Authorization
+@using LibraryApplication.Dtos
+@using LibraryApplication.Extensions
+@using LibraryApplication.Services
+@using Microsoft.EntityFrameworkCore
+@inject IDbContextFactory<LibraryDbContext> DbContextFactory
+@inject CurrentUserService CurrentUserService
+@inject NavigationManager Navigation
+@inject IToastService ToastService
+@implements IDisposable
+@attribute [Authorize(Roles = "Admin, User")]
+
+@rendermode InteractiveServer
+
+<h3>My Profile</h3>
+
+<FluentLabel><b>ID</b>: @currentUser?.Id</FluentLabel>
+<FluentLabel><b>Name</b>: @currentUser?.Name</FluentLabel>
+<FluentLabel><b>Email</b>: @currentUser?.Email</FluentLabel>
+
+<h3>Borrowed books</h3>
+
+<FluentDataGrid @ref="booksGrid" TGridItem="BookCopyDto" Items="@bookCopies" AutoFit="true" Style="width: 100%; max-height: 400px;" Pagination="@booksGridPaginationState">
+    <PropertyColumn Property="book => book.Id"></PropertyColumn>
+    <PropertyColumn Property="book => book.Name"></PropertyColumn>
+    <PropertyColumn Property="book => book.Isbn"></PropertyColumn>
+    <PropertyColumn Property="book => book.Author"></PropertyColumn>
+    <PropertyColumn Property="book => book.Year"></PropertyColumn>
+    <TemplateColumn>
+        <FluentButton IconEnd="@(new Icons.Regular.Size20.ArrowRight())" Title="Return book" OnClick="async () => await ReturnBookAsync(context.Id)"></FluentButton>
+    </TemplateColumn>
+</FluentDataGrid>
+
+<FluentPaginator State="@booksGridPaginationState"></FluentPaginator>
+
+<h3>History</h3>
+
+<FluentDataGrid @ref="historyGrid" TGridItem="HistoryEntryDto" Items="@currentUserHistory" AutoFit="true" Style="width: 100%; max-height: 400px;" Pagination="@historyGridPaginationState">
+    <PropertyColumn Property="entry => entry.Id"></PropertyColumn>
+    <PropertyColumn Property="entry => entry.Action"></PropertyColumn>
+    <PropertyColumn Property="entry => entry.TimeStamp"></PropertyColumn>
+</FluentDataGrid>
+
+<FluentPaginator State="@historyGridPaginationState"></FluentPaginator>
+
+@code {
+    FluentDataGrid<BookCopyDto>? booksGrid;
+    FluentDataGrid<HistoryEntryDto>? historyGrid;
+
+    readonly PaginationState booksGridPaginationState = new() { ItemsPerPage = 10 };
+    readonly PaginationState historyGridPaginationState = new() { ItemsPerPage = 10 };
+    
+    IQueryable<BookCopyDto>? bookCopies;
+    IQueryable<HistoryEntryDto>? currentUserHistory;
+    UserDto? currentUser;
+
+    public required LibraryDbContext Context { get; set; }
+    
+    protected override async Task OnInitializedAsync()
+    {
+        Context = await DbContextFactory.CreateDbContextAsync();
+        
+        currentUser = await CurrentUserService.GetCurrentUserAsync();
+
+        if (currentUser is null)
+        {
+            Navigation.NavigateTo("/");
+            return;
+        }
+        
+        bookCopies = Context.GetBookCopiesByUserQueryable(currentUser!.Id);
+        currentUserHistory = Context.GetHistoryEntriesByUserQuery(currentUser!.Id);
+    }
+
+    async Task ReturnBookAsync(Guid bookCopyId)
+    {
+        if (currentUser is null)
+        {
+            ToastService.InvalidUser();
+            return;
+        }
+        
+        var result = await Context.ReturnBookCopyAsync(bookCopyId, currentUser.Id);
+        
+        if (result)
+        {
+            ToastService.BookReturned();
+        }
+        else
+        {
+            ToastService.FailedToReturnBook();
+        }
+
+        if (booksGrid is not null)
+        {
+            await booksGrid.RefreshDataAsync();
+        }
+
+        if (historyGrid is not null)
+        {
+            await historyGrid.RefreshDataAsync();
+        }
+    }
+
+    public void Dispose()
+    {
+        Context.Dispose();
+    }
+}

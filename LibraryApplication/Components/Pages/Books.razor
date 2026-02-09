@@ -1,0 +1,159 @@
+@page "/Books"
+@using System.ComponentModel.DataAnnotations
+@using System.Diagnostics.CodeAnalysis
+@using Microsoft.AspNetCore.Components.Authorization
+@using LibraryApplication.Dtos
+@using LibraryApplication.Extensions
+@using LibraryApplication.Services
+@using Microsoft.EntityFrameworkCore
+@inject IDbContextFactory<LibraryDbContext> DbContextFactory
+@inject NavigationManager Navigation
+@inject IToastService ToastService
+
+@implements IDisposable
+
+@rendermode InteractiveServer
+
+<FluentStack Orientation="Orientation.Horizontal" VerticalAlignment="VerticalAlignment.Center">
+    <h3>Books</h3>
+    <FluentSpacer/>
+    <FluentTextField ValueChanged="@OnSearchTermChanged" Style="margin-right: 0.5rem;" Placeholder="Name, Author or ISBN" Label="Search"></FluentTextField>
+    <CascadingAuthenticationState>
+        <AuthorizeView Roles="Admin">
+            <FluentButton Id="add-book-popover" OnClick="@AddBookClicked"
+                          IconStart="@(new Icons.Regular.Size20.Add())"></FluentButton>
+        </AuthorizeView>
+    </CascadingAuthenticationState>
+</FluentStack>
+
+<FluentPopover Style="width: 300px;" VerticalThreshold="170" AnchorId="add-book-popover" @bind-Open="addBookModal">
+    <Header>Callout Header</Header>
+    <Body>
+    @if (newBook is not null)
+    {
+        <EditForm Model="@newBook" OnValidSubmit="@AddBookCloseModal" FormName="starship_fluent_entry" novalidate>
+            <DataAnnotationsValidator/>
+            <FluentValidationSummary/>
+
+            <FluentStack Orientation="Orientation.Vertical">
+                <FluentTextField tabindex="0" @bind-Value="@newBook.Name" Label="Name"></FluentTextField>
+                <FluentValidationMessage For="@(() => newBook.Name)"></FluentValidationMessage>
+
+                <FluentTextField tabindex="1" @bind-Value="@newBook.Author" Label="Author"></FluentTextField>
+                <FluentValidationMessage For="@(() => newBook.Author)"></FluentValidationMessage>
+
+                <FluentTextField tabindex="2" @bind-Value="@newBook.Isbn" Label="ISBN"></FluentTextField>
+                <FluentValidationMessage For="@(() => newBook.Isbn)"></FluentValidationMessage>
+
+                <FluentNumberField tabindex="3" @bind-Value="@newBook.Year" Label="Year"></FluentNumberField>
+                <FluentValidationMessage For="@(() => newBook.Year)"></FluentValidationMessage>
+
+                <FluentStack Orientation="Orientation.Horizontal">
+                    <FluentButton Type="ButtonType.Submit">Add</FluentButton>
+                    <FluentSpacer/>
+                    <FluentButton OnClick="@CancelAddBookCloseModal">Cancel</FluentButton>
+                </FluentStack>
+            </FluentStack>
+        </EditForm>
+    }
+    </Body>
+</FluentPopover>
+
+<FluentDataGrid @ref="grid" TGridItem="BookDto" Items="@BooksSearchQuery" Style="width: 100%;" AutoFit="true" OnRowClick="@OnBookClicked">
+    <PropertyColumn Property="book => book.Id"></PropertyColumn>
+    <PropertyColumn Property="book => book.Name"></PropertyColumn>
+    <PropertyColumn Property="book => book.Isbn"></PropertyColumn>
+    <PropertyColumn Property="book => book.Author"></PropertyColumn>
+    <PropertyColumn Property="book => book.Year"></PropertyColumn>
+    <PropertyColumn Property="book => book.AvailableCopies"></PropertyColumn>
+</FluentDataGrid>
+
+@code {
+    FluentDataGrid<BookDto>? grid;
+    bool addBookModal;
+    NewBookDto? newBook;
+    public required LibraryDbContext Context { get; set; }
+    
+    IQueryable<BookDto>? BooksSearchQuery { get; set; }
+
+    protected override async Task OnInitializedAsync()
+    {
+        Context = await DbContextFactory.CreateDbContextAsync();
+        BooksSearchQuery = Context.GetBooksQueryable();
+    }
+
+    void AddBookClicked()
+    {
+        newBook = new();
+        addBookModal = true;
+    }
+
+    async Task AddBookCloseModal()
+    {
+        if (newBook is null)
+        {
+            ToastService.FailedToAddBook();
+            return;
+        }
+        
+        var result = await Context.AddBookAsync(newBook.Name, newBook.Author, newBook.Year, newBook.Isbn);
+
+        if (result)
+        {
+            ToastService.BookAdded();
+        }
+        else
+        {
+            ToastService.FailedToAddBook();
+        }
+        
+        addBookModal = false;
+        if (grid is not null)
+        {
+            await grid.RefreshDataAsync();
+        }
+    }
+
+    void CancelAddBookCloseModal()
+    {
+        addBookModal = false;
+    }
+
+    [RequiresUnreferencedCode("Necessary because of RangeAttribute usage")]
+    class NewBookDto
+    {
+        [Required, MaxLength(128)] public string Name { get; set; } = string.Empty;
+
+        [Required, MaxLength(128)] public string Author { get; set; } = string.Empty;
+
+        [Required, Range(-10000, 10000)] public int Year { get; set; } = 2000;
+
+        [Required, MaxLength(13), MinLength(13)] public string Isbn { get; set; } = string.Empty;
+    }
+
+    private void OnBookClicked(FluentDataGridRow<BookDto> arg)
+    {
+        var selectedBook = arg.Item;
+
+        if (selectedBook is not null)
+        {
+            Navigation.NavigateTo($"books/{selectedBook.Id}");
+        }
+    }
+
+    async Task OnSearchTermChanged(string? newSearchTerm)
+    {
+        BooksSearchQuery = Context.GetBooksQueryable(newSearchTerm);
+
+        if (grid is not null)
+        {
+            await grid.RefreshDataAsync();
+        }
+    }
+
+    public void Dispose()
+    {
+        Context.Dispose();
+    }
+
+}

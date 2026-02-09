@@ -1,0 +1,165 @@
+@page "/Books/{bookId}"
+@using Microsoft.AspNetCore.Components.Authorization
+@using LibraryApplication.Dtos
+@using LibraryApplication.Extensions
+@using LibraryApplication.Services
+@using Microsoft.EntityFrameworkCore
+@inject IDbContextFactory<LibraryDbContext> DbContextFactory
+@inject CurrentUserService CurrentUserService
+@inject IToastService ToastService
+@implements IDisposable
+
+
+@rendermode InteractiveServer
+
+<h3>Book Detail</h3>
+
+<FluentLabel><b>ID</b>: @book?.Id</FluentLabel>
+<FluentLabel><b>Name</b>: @book?.Name</FluentLabel>
+<FluentLabel><b>Author</b>: @book?.Author</FluentLabel>
+<FluentLabel><b>Year</b>: @book?.Year</FluentLabel>
+<FluentLabel><b>ISBN</b>: @book?.Isbn</FluentLabel>
+
+<CascadingAuthenticationState>
+    <FluentStack Orientation="Orientation.Horizontal" VerticalAlignment="VerticalAlignment.Center">
+        <h3>Copies</h3>
+        <FluentSpacer/>
+        <AuthorizeView Roles="Admin" Context="authorizedViewContext">
+            <FluentButton IconEnd="@(new Icons.Regular.Size20.Add())" OnClick="@AddBookCopyAsync"></FluentButton>
+        </AuthorizeView>
+    </FluentStack>
+
+    <FluentDataGrid @ref="grid" TGridItem="BookCopyDto" Items="@bookCopies" Style="width: 100%;" AutoFit="true">
+        <PropertyColumn Property="bookCopy => bookCopy.Id"></PropertyColumn>
+        <PropertyColumn Property="bookCopy => bookCopy.IsAvailable"></PropertyColumn>
+        <TemplateColumn>
+            <AuthorizeView Context="authorizedViewContext">
+                <FluentButton IconEnd="@(new Icons.Regular.Size20.Cart())"
+                              Title="Borrow book"
+                              OnClick="async () => await BorrowBookCopy(context.Id)"></FluentButton>
+            </AuthorizeView>
+        </TemplateColumn>
+        <TemplateColumn>
+            <AuthorizeView Roles="Admin" Context="authorizedViewContext">
+                <FluentButton IconEnd="@(new Icons.Regular.Size20.Delete())"
+                              Title="Remove copy"
+                              OnClick="async () => await RemoveBookCopy(context.Id)"></FluentButton>
+            </AuthorizeView>
+        </TemplateColumn>
+    </FluentDataGrid>
+</CascadingAuthenticationState>
+
+@code {
+    [Parameter] public required string BookId { get; set; }
+    BookDto? book;
+    IQueryable<BookCopyDto>? bookCopies;
+
+    FluentDataGrid<BookCopyDto>? grid;
+    UserDto? user;
+
+    public required LibraryDbContext Context { get; set; }
+    
+    protected override async Task OnInitializedAsync()
+    {
+        Context = await DbContextFactory.CreateDbContextAsync();
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (!Guid.TryParse(BookId, out Guid bookId))
+        {
+            ToastService.Error("Invalid Book ID");
+            return;
+        }
+
+        book = await Context.GetBookAsync(bookId);
+
+        if (book is null)
+        {
+            ToastService.BookNotFound();
+            return;
+        }
+
+        bookCopies = Context.GetBookCopiesByBookQueryable(book.Id);
+        user = await CurrentUserService.GetCurrentUserAsync();
+    }
+
+    async Task AddBookCopyAsync()
+    {
+        if (book is null)
+        {
+            ToastService.BookNotFound();
+            return;
+        }
+
+        if (user is null)
+        {
+            ToastService.InvalidUser();
+            return;
+        }
+
+        var result = await Context.AddBookCopyAsync(book.Id, user.Id);
+        if (result)
+        {
+            ToastService.BookCopyAdded();
+        }
+        else
+        {
+            ToastService.FailedToAddBook();
+        }
+
+        if (grid is not null)
+        {
+            await grid.RefreshDataAsync();
+        }
+    }
+
+    async Task RemoveBookCopy(Guid copyId)
+    {
+        var result = await Context.RemoveBookCopyAsync(copyId);
+        
+        if (result)
+        {
+            ToastService.BookCopyRemoved();
+        }
+        else
+        {
+            ToastService.FailedToRemoveBookCopy();
+        }
+
+        if (grid is not null)
+        {
+            await grid.RefreshDataAsync();
+        }
+    }
+
+    async Task BorrowBookCopy(Guid copyId)
+    {
+        if (user is null)
+        {
+            ToastService.Error("User is invalid.");
+            return;
+        }
+
+        var result = await Context.BorrowBookCopyAsync(copyId, user.Id);
+
+        if (result)
+        {
+            ToastService.BookBorrowed();
+        }
+        else
+        {
+            ToastService.FailedToBorrowBook();
+        }
+
+        if (grid is not null)
+        {
+            await grid.RefreshDataAsync();
+        }
+    }
+
+    public void Dispose()
+    {
+        Context.Dispose();
+    }
+}
