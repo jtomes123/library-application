@@ -320,4 +320,6 @@ The database includes tables for:
 - History Entries
 
 ---
+## AI Use
 
+ChatGPT and Github Copilot (mainly model Claude Sonnet 4.5) were used during development, mostly during conceptualization phase for architecture review and validation and at the end of development for documentation. Additionally ChatGPT was used for DB access layer validation.
